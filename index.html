@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title>You Don't Know Node.js</title>
+
+		<meta name="description" content="You don't know Node.js">
+		<meta name="author" content="Vance Lucas">
+
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.css">
+		<link rel="stylesheet" href="css/theme/moon.css" id="theme">
+
+		<!-- Theme used for syntax highlighting of code -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+    <style type="text/css">
+      .flex {
+        display: flex;
+      }
+      .flex-item {
+        display: flex;
+      }
+      .flex-1 {
+        flex-grow: 1;
+      }
+    </style>
+
+		<!-- Printing and PDF exports -->
+		<script>
+			var link = document.createElement( 'link' );
+			link.rel = 'stylesheet';
+			link.type = 'text/css';
+			link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' : 'css/print/paper.css';
+			document.getElementsByTagName( 'head' )[0].appendChild( link );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+
+<section data-markdown>
+## You Don't Know Node.js
+
+(or, How JavaScript Actually Works)
+
+Vance Lucas
+</section>
+
+<section>
+  <h2>Vance Lucas</h2>
+  <div class="flex">
+    <div class="flex-1">
+      <h4>Personal</h4>
+      <ul>
+        <li>Web: <a href="http://vancelucas.com">vancelucas.com</a></li>
+        <li>Twitter: <a href="https://twitter.com/vlucas">@vlucas</a></li>
+        <li>Christian</li>
+        <li>Oklahoma City, OK</li>
+      </ul>
+      <br />
+      <br />
+
+      <h4>Professional</h4>
+      <ul>
+        <li>Work: <del><a href="http://www.netsuite.com">NetSuite</a></del> <a href="http://www.oracle.com">Oracle</a></li>
+        <li>User Group: <a href="http://okcjs.com">OKC.js</a></li>
+        <li>Conference: <a href="http://thunderplainsconf.com">ThunderPlains</a></li>
+        <li>Community: <a href="http://techlahoma.org">Techlahoma</a></li>
+      </ul>
+    </div>
+    <img alt="Family" class="flex-item" height="540" src="img/family.jpg" />
+  </div>
+</section>
+
+<section data-markdown>
+## Two Parts
+
+1. The Event Loop (aka "How JavaScript Actually Works")
+
+2. Node.js Patterns and Pitfalls
+</section>
+
+<section data-markdown>
+## The Event Loop
+
+How JavaScript Actually Works
+</section>
+
+<section>
+  <img alt="Node.js Event Loop" src="img/event-loop.png" />
+  <small><a href="https://www.packtpub.com/web-development/build-network-application-node-video">https://www.packtpub.com/web-development/build-network-application-node-video</a></small>
+</section>
+
+<section data-markdown>
+## How The Event Loop Works
+
+* http://latentflip.com/loupe/
+
+* Philip Roberts: What the heck is the event loop anyway?
+  https://www.youtube.com/watch?v=8aGhZQkoFbQ
+</section>
+
+<section>
+  <img alt="JS Environment" src="img/js-env.png" />
+</section>
+
+<section data-markdown>
+# Demo
+</section>
+
+<section data-markdown>
+### Don't Block The Event Loop!
+* Don’t do heavy I/O, large file parsing, or major computations in your main process
+* All major processing in compiled libraries or queue
+
+* node-blocked NPM package
+* https://github.com/tj/node-blocked
+</section>
+
+<section data-markdown>
+# Node.js
+</section>
+
+<section data-markdown>
+## Node Process
+
+* Runs forever
+
+* Does not cleanup/tear down
+
+* Need to watch memory usage
+
+* Callbacks for everything
+
+* Single threaded (*)
+</section>
+
+<section data-markdown>
+## Callbacks in JS
+
+```
+$.get('http://example.com', function (data) {
+    console.log(data);
+});
+```
+</section>
+
+<section data-markdown>
+## Callbacks in Node
+
+```
+var fs = require('fs');
+
+fs.readFile('myfile.txt', function (err, data) {
+  if (err) {
+    console.error(err);
+  }
+
+  console.log('Got data: ', data);
+});
+```
+</section>
+
+<section data-markdown>
+## Everything is async
+
+```
+db.users.find({ name: 'John Connor' }, function (err, users) {
+  if (err) {
+    res.json({
+      success: false,
+      message: 'Error: unable to find John Connor'
+    });
+  }
+
+  let addresses = users.map((user) => user.address);
+  res.json({
+    success: true,
+    addresses
+  });
+});
+```
+</section>
+
+<section data-markdown>
+## Promises
+(for those who don't like callbaks)
+</section>
+
+<section data-markdown>
+## Promises
+
+```javascript
+doSomething()
+  .then(doThing2)
+  .then(doThing3)
+  .then(doThing4)
+  .then(function (result) {
+    doThing5(someArg, result);
+  })
+  .catch(function (e) {
+    console.error("unable to read whatever")
+  });
+```
+</section>
+
+<section data-markdown>
+## Parallel Exection
+
+```javascript
+Promise.all([
+    doThing2,
+    doThing3,
+    doThing4
+  ])
+  .then(function (results) {
+    doThing5(someArg, results);
+  })
+  .catch(console.error);
+```
+</section>
+
+<section data-markdown>
+## Callback Style
+
+```javascript
+fs.readFile("file.json", function (err, json) {
+  if (err) {
+    console.error("unable to read file");
+  } else {
+    try {
+      json = JSON.parse(json);
+      console.log(json.success);
+    } catch(e) {
+      console.error("invalid json in file");
+    }
+  }
+});
+```
+</section>
+
+<section data-markdown>
+## Promises
+
+```javascript
+fs.readFileAsync("file.json")
+  .then(JSON.parse)
+  .then(console.log)
+  .catch(SyntaxError, function(e) {
+    console.error("Invalid json in file");
+  })
+  .catch(function(e) {
+    console.error("Unable to read file")
+  });
+```
+</section>
+
+<section data-markdown>
+# Databases
+</section>
+
+<section data-markdown>
+## DB Connections
+
+* How are you connecting to your db?
+
+* Are you using a connection pool?
+
+* Remember: Node runs forever, and does not cleanup after each request
+</section>
+
+<section data-markdown>
+## Before
+
+Typical style of PHP, Ruby, Python, etc.
+
+```javascript
+const options = require('../config');
+const mysql = require('mysql');
+
+// Single db connection
+const connection = mysql.createConnection(options.mysql);
+
+function getSettings(callback) {
+  connection.query(
+    'SELECT id, setting_name, setting_value FROM settings',
+    callback
+  );
+}
+```
+</section>
+
+<section data-markdown>
+## After
+
+Use connection pooling since Node.js runs forever
+
+```javascript
+const options = require('../config');
+// ...
+const mysqlPool = require('./mysqlPool');
+
+// Connection pool
+let connection = mysqlPool.create({ logSql: false }, "DBPool", options.mysql);
+
+function getSettings(callback) {
+  connection.query(
+    'SELECT id, setting_name, setting_value FROM settings',
+    callback
+  );
+}
+```
+</section>
+
+<section data-markdown>
+## Use Knex.js
+
+In reality, just use a 3rd party library like Knex.js
+
+```javascript
+const knex = require('knex'); // Does connection pooling for you
+const connection = require('knex')({
+  client: 'pg',
+  connection: process.env.DATABASE_URL
+});
+
+// Use Knex.js and Promises
+function getSettings() {
+  return connection.select('id', 'setting_name', 'setting_value')
+    .from('settings');
+}
+```
+</section>
+
+<section data-markdown>
+## Error Handling
+</section>
+
+<section data-markdown>
+## On Unhandled Error...
+* Node process crashes &amp; exits
+
+* Need to catch and handle all errors
+
+* Try/catch doesn’t work like you think
+
+* Promises can help, but also have downsides
+</section>
+
+<section data-markdown>
+## Uncaught Exceptions
+
+```javascript
+process.on('uncaughtException', function (err) {
+  console.error('Uncaught exception: ', err);
+  process.exit(1);
+});
+```
+</section>
+
+<section data-markdown>
+## Unhandled Promise Rejections
+
+```javascript
+process.on('unhandledRejection', function (err, promise) {
+  console.error('Unhandled Promise Rejection: ', err, promise);
+  process.exit(1);
+});
+```
+</section>
+
+<section data-markdown>
+## Naïve Try/Catch
+
+```javascript
+const fs = require('fs');
+
+try {
+  fs.readFile('doesnotexist.txt', function (err, data) {
+    throw new Error('File does not exist!');
+  });
+} catch(e) {
+  console.log('There was an error, but I handled it, right?');
+}
+```
+</section>
+
+<section data-markdown>
+## Try/Catch Blocks
+* Callbacks will be executed on the stack at a different time than your try/catch block
+
+* They are basically useless unless they are **everywhere** in all your async callbacks
+
+* Promises can help with 'catch' method
+
+* async/await (future) will work with try/catch as expected
+</section>
+
+
+<section data-markdown>
+## Future with async/await
+
+```javascript
+const fs = require('fs');
+
+try {
+  let file = await fs.readFile('doesnotexist.txt');
+} catch(e) {
+  console.log('There was an error, but I actually handled it this time.');
+}
+```
+</section>
+
+<section data-markdown>
+## Gotchas
+### Things to watch out for
+</section>
+
+<section data-markdown>
+## Network I/O
+
+* No default timeouts for network requests
+
+* Sometimes you still have to .end() the connection itself on timeout event
+
+* This is on purpose, **by design**
+</section>
+
+<section data-markdown>
+## Adding Timeouts
+
+```javascript
+server.on('connection', function (socket) {
+  console.log('SOCKET OPENED');
+  socket.on('end', function() {
+    log.info('SOCKET END: other end of the socket sends a FIN packet');
+  });
+
+  // Set & listen for timeout
+  socket.setTimeout(2000);
+  socket.on('timeout', function () {
+    log.info('SOCKET TIMEOUT');
+    socket.end(); // have to sever/end socket manually
+  });
+});
+```
+</section>
+
+<section data-markdown>
+## Express.js Routes
+
+Sends a response
+
+```javascript
+app.get('/ping', function (req, res) {
+  res.send('Pong');
+});
+```
+
+Will not send a response
+
+```javascript
+app.get('/ping2', function (req, res) {
+  console.log('Never ends HTTP request');
+});
+```
+</section>
+
+<section data-markdown>
+## Keep it DRY
+</section>
+
+<section data-markdown>
+## Response Logic
+
+```javascript
+app.post('/register', jsonApi.isType('user'), function (req, res) {
+  users.register(req.body.data.attributes.first_name)
+    .then(function (result) {
+      res.json({ data: result });
+    })
+    .catch(function (err) {
+      res.send('Error! ' + err);
+    });
+});
+```
+
+```javascript
+app.get('/:id', function (req, res) {
+  users.findById(req.params.id)
+    .then(function (result) {
+      res.json({ data: result });
+    })
+    .catch(function (err) {
+      res.send('Error! ' + err);
+    });
+});
+```
+</section>
+
+<section data-markdown>
+## Logic-less routes
+
+Use functions that return functions
+```javascript
+app.post('/register', jsonApi.isType('user'), function (req, res) {
+  users.register(req.body.data.attributes.first_name)
+    .then(sdk.respondWithResults(req, res, 201))
+    .catch(sdk.respondWithError(req, res));
+});
+```
+
+Pass in `req` and `res`
+
+```javascript
+app.get('/:id', function (req, res) {
+  users.findById(req.params.id)
+    .then(sdk.respondWithResults(req, res))
+    .catch(sdk.respondWithError(req, res));
+});
+```
+
+`respondWithResults` returns a closure
+</section>
+
+<section data-markdown>
+## Passing req/res
+
+Return closure that uses `results`
+
+```javascript
+function respondWithResults(req, res, type = 'result', httpStatus = 200) {
+  return function (results) {
+    if (!results) {
+      results = {};
+    }
+
+    res.status(httpStatus).json(results);
+  };
+}
+```
+</section>
+
+<section>
+  <p style="font-size:2em;">setTimeout(callback, 2000)</p>
+</section>
+
+<section data-markdown>
+## Questions?
+
+Tomorrow:
+
+"Effective Browser JavaScript Debugging" @ 10:00
+</section>
+
+			</div>
+
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.js"></script>
+
+		<script>
+
+			// More info https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				transition: 'slide', // none/fade/slide/convex/concave/zoom
+
+				// More info https://github.com/hakimel/reveal.js#dependencies
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true },
+					{ src: 'plugin/notes/notes.js', async: true }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>
