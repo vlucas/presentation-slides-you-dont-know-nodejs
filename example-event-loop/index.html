@@ -1,0 +1,2852 @@
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>The Event Loop (or how Javascript works)</title>
+    <style type="text/css" media="screen">
+      @import url(http://fonts.googleapis.com/css?family=Droid+Serif);
+      @import url(http://fonts.googleapis.com/css?family=Oswald);
+
+      body {
+        font-family: 'Droid Serif';
+        font-size: 20px;
+      }
+      h1, h2, h3 {
+        font-family: 'Oswald';
+        font-weight: 400;
+        margin-bottom: 0;
+      }
+      h1 { font-size: 4em; }
+      h2 { font-size: 2em; }
+      h3 { font-size: 1.6em; }
+      .footnote {
+        position: absolute;
+        bottom: 3em;
+        font-size: 12px;
+      }
+      li p {
+        line-height: 1.25em;
+        font-size: 1.25em;
+      }
+      .red { color: #fa0000; }
+      .large { font-size: 2em; }
+      a, a > code {
+        color: rgb(249, 38, 114);
+        text-decoration: none;
+      }
+      code {
+        -moz-border-radius: 5px;
+        -web-border-radius: 5px;
+        background: #e7e8e2;
+        border-radius: 5px;
+        font-size: 14px;
+      }
+      .pull-left {
+        float: left;
+        width: 47%;
+      }
+      .pull-right {
+        float: right;
+        width: 47%;
+      }
+      .pull-right ~ p {
+        clear: both;
+      }
+      #slideshow .slide .content code {
+        font-size: 0.7em;
+      }
+      #slideshow .slide .content pre code {
+        font-size: 0.8em;
+        padding: 15px;
+      }
+      .inverse {
+        background: #1A4162;
+        color: #777872;
+        text-shadow: 0 0 20px #333;
+      }
+      .inverse h1, .inverse h2 {
+        color: #f3f3f3;
+        line-height: 1.1em;
+      }
+
+      /* Slide-specific styling */
+      #slide-inverse .footnote {
+        bottom: 12px;
+        left: 20px;
+      }
+
+      /* Two-column layout */
+      .left-column {
+        color: #777;
+        width: 20%;
+        height: 92%;
+        float: left;
+      }
+      .left-column h2:last-of-type, .left-column h3:last-child {
+        color: #000;
+      }
+      .right-column {
+        width: 75%;
+        float: right;
+        padding-top: 2em;
+      }
+
+      .small ul {
+          font-size: 1.0em;
+          line-height: 1.3em;
+      }
+
+      ul {
+        font-size: 1.5em;
+        line-height: 1.5em;
+      }
+
+      ul ul {
+        font-size: .95em;
+        line-height: 1.2em;
+      }
+    </style>
+    <link rel="stylesheet" type="text/css" href="js-runtime-overview.css" />
+    <link rel="stylesheet" type="text/css" href="callstack.css" />
+    <link rel="stylesheet" type="text/css" href="js-runtime-viz.css" />
+  </head>
+  <body>
+    <textarea id="source">
+<!--
+Picture of Javascript runtime
+General overview
+-->
+<div id="js-runtime-overview">
+    <div class="js-runtime">
+        <div class="heap">
+            Heap
+            <div class="heap-obj heap-obj1"></div>
+            <div class="heap-obj heap-obj2"></div>
+            <div class="heap-obj heap-obj3"></div>
+        </div>
+        <div class="stack">
+            Stack
+            <div class="stack-obj-container">
+                <div class="stack-obj">baz()</div>
+                <div class="stack-obj">bar()</div>
+                <div class="stack-obj">foo()</div>
+                <div class="stack-obj">main()</div>
+            </div>
+        </div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+    <div class="callback-queue">
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+    </div>
+    <div class="external-apis">
+        <div class="api">setTimeout</div>
+        <div class="api">I/O</div>
+        <div class="api">Rendering</div>
+    </div>
+    <div class="event-loop-label">Event Loop</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="js-runtime-label">JS Runtime</div>
+    <div class="external-apis-label">External APIs</div>
+</div>
+
+---
+#Call Stack
+
+* Currently executing code
+* Javascript has exactly 1 callstack
+* Hence why commonly explained as single threaded
+
+---
+class: middle, center
+##Example
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack"></div>
+    <div class="codes">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">printUsername()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code on-stack">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack on-stack">
+        <div class="call-stack-container">
+            <div class="call">combineNames()</div>
+            <div class="call">printUsername()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code on-stack">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code on-stack">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack on-stack">
+        <div class="call-stack-container">
+            <div class="call">concat()</div>
+            <div class="call">combineNames()</div>
+            <div class="call">printUsername()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code concat-code on-stack">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code on-stack">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code on-stack">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack on-stack">
+        <div class="call-stack-container">
+            <div class="call">combineNames()</div>
+            <div class="call">printUsername()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code on-stack">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code on-stack">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack on-stack">
+        <div class="call-stack-container">
+            <div class="call">printUsername()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code on-stack">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack on-stack">
+        <div class="call-stack-container">
+            <div class="call">console.log()</div>
+            <div class="call">printUsername()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code on-stack">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack on-stack">
+        <div class="call-stack-container">
+            <div class="call">printUsername()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code on-stack">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack on-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Basic Call Stack Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="codes">
+        <pre class="code concat-code">
+function concat(str1, str2) {
+    return str1 + "" + str2;
+}
+        </pre>
+        <pre class="code combine-code">
+function combineNames(user) {
+    return concat(user.first,
+                  user.last);
+}
+        </pre>
+        <pre class="code print-code">
+function printUsername(user) {
+    var name = combineNames(user);
+    console.log(name);
+}
+        </pre>
+        <pre class="code">
+printUsername({
+    first: "Karl",
+    last: "Kirch"
+});
+        </pre>
+    </div>
+</div>
+
+
+
+
+
+---
+class: middle, center
+##Stack Overflow
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="codes">
+        <pre class="code foo-code">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+</div>
+
+---
+<!-- Stack Overflow Example -->
+<div class="call-stack-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">foo()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="codes on-stack">
+        <pre class="code foo-code on-stack">
+function foo() {
+    return foo();
+}
+        </pre>
+        <pre class="code">
+foo();
+        </pre>
+    </div>
+    <img class="fail" src="explosion.png" />
+    <img class="error" src="stackoverflow.png" />
+</div>
+
+
+---
+layout: false
+class: middle, center, inverse
+#The Event Loop and friends
+
+---
+<div id="js-runtime-overview">
+    <div class="js-runtime">
+        <div class="heap">
+            Heap
+            <div class="heap-obj heap-obj1"></div>
+            <div class="heap-obj heap-obj2"></div>
+            <div class="heap-obj heap-obj3"></div>
+        </div>
+        <div class="stack">
+            Stack
+            <div class="stack-obj-container">
+                <div class="stack-obj">baz()</div>
+                <div class="stack-obj">bar()</div>
+                <div class="stack-obj">foo()</div>
+                <div class="stack-obj">main()</div>
+            </div>
+        </div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+    <div class="callback-queue">
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+    </div>
+    <div class="external-apis">
+        <div class="api">setTimeout</div>
+        <div class="api">I/O</div>
+        <div class="api">Rendering</div>
+    </div>
+    <div class="event-loop-label">Event Loop</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="js-runtime-label">JS Runtime</div>
+    <div class="external-apis-label">External APIs</div>
+</div>
+
+---
+<div id="js-runtime-overview">
+    <div class="js-runtime">
+        <div class="heap">
+            Heap
+            <div class="heap-obj heap-obj1"></div>
+            <div class="heap-obj heap-obj2"></div>
+            <div class="heap-obj heap-obj3"></div>
+        </div>
+        <div class="stack">
+            Stack
+            <div class="stack-obj-container">
+                <div class="stack-obj">baz()</div>
+                <div class="stack-obj">bar()</div>
+                <div class="stack-obj">foo()</div>
+                <div class="stack-obj">main()</div>
+            </div>
+        </div>
+    </div>
+    <div class="js-runtime-gray"></div>
+    <img class="event-loop" src="event-loop.png" />
+    <div class="callback-queue">
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+        <div class="callback">cb</div>
+    </div>
+    <div class="external-apis">
+        <div class="api">setTimeout</div>
+        <div class="api">I/O</div>
+        <div class="api">Rendering</div>
+    </div>
+    <div class="event-loop-label">Event Loop</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="js-runtime-label">JS Runtime</div>
+    <div class="external-apis-label">External APIs</div>
+</div>
+
+---
+#Callback/Task Queue
+
+* Holds the list of tasks/callbacks to be executed next
+* Is unbounded (can grow infinitely long)
+* Multiple ways to add things to it
+    - setTimeout(fn, 0);
+    - setImmediate(fn);
+    - nextTick(fn);
+
+
+---
+#External APIs
+* Do everything not Javascript related
+* Can use other threads
+* Examples of External APIs
+    - Network I/O
+    - Rendering Calls
+    - Timeouts/Intervals
+    - File System Access
+    - C++ code
+    - Web Workers
+
+
+---
+#Event Loop
+<!--
+Who knows what an event loop is?
+Who's written one?
+-->
+
+* Loop that waits for and dispatches events from the callback queue to the callstack
+* Only dispatches when callstack is empty
+* You have no control over this
+
+<!--
+Literally all it does, grabs events off of the task queue and replaces the call stack with the code from the task queue
+-->
+
+---
+class: middle, center
+##Async example
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">setTimeout()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                setTimeout
+                <img src="spinner.gif" />
+                <div class="cb">doTimeout</div>
+            </div>
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">console.log()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                setTimeout
+                <img src="spinner.gif" />
+                <div class="cb">doTimeout</div>
+            </div>
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                setTimeout
+                <img src="spinner.gif" />
+                <div class="cb">doTimeout</div>
+            </div>
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+Waiting for timeout
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                setTimeout
+                <img src="spinner.gif" />
+                <div class="cb">doTimeout</div>
+            </div>
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+Waiting for timeout
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+Waiting for timeout
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">doTimeout</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">doTimeout()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+Waiting for timeout
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">console.log()</div>
+            <div class="call">doTimeout()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+Waiting for timeout
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">doTimeout()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+Waiting for timeout
+Timeout complete
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- SetTimeout Example -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+    <div class="codes">
+
+```
+function doTimeout() {
+    console.log("Timeout complete");
+}
+
+setTimeout(doTimeout, 5000);
+
+console.log("Waiting for timeout");
+```
+</div>
+    <pre class="console">
+Waiting for timeout
+Timeout complete
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+
+
+
+
+
+
+---
+class: middle, center
+##Browser - Element onClick
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">document.getElementById()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">addEventListener()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">handleClick</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">handleClick()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">console.log()</div>
+            <div class="call">handleClick()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">handleClick()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+Clicked!!
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+Clicked!!
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+Clicked!!
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">handleClick</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">handleClick()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+Clicked!!
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">console.log()</div>
+            <div class="call">handleClick()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+Clicked!!
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">handleClick()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+Clicked!!
+Clicked!!
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive onclick event -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                theButton.onClick
+                <img src="spinner.gif" />
+                <div class="cb">handleClick</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function handleClick(evt) {
+    console.log("Clicked!!")
+}
+
+var btn = document
+        .getElementById("theButton");
+
+btn.addEventListener('click',
+                        handleClick);
+```
+</div>
+    <pre class="console">
+Clicked!!
+Clicked!!
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+---
+class: middle, center
+##Blocking example
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">setInterval()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">setInterval()</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">Blocking CPU Task</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">Blocking CPU Task</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">onInterval</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">Blocking CPU Task</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">Blocking CPU Task</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">Blocking CPU Task</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+        <div class="cb">renderUI</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">Blocking CPU Task</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+        <div class="cb">renderUI</div>
+        <div class="cb">acceptConnection</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">Blocking CPU Task</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+        <div class="cb">renderUI</div>
+        <div class="cb">acceptConnection</div>
+        <div class="cb">writeResponse</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+</div>
+
+---
+<!-- Interactive blocking -->
+<div class="js-runtime-viz">
+    <div class="call-stack-label">Call Stack</div>
+    <div class="external-apis-label">External APIs</div>
+    <div class="console-label">Console</div>
+    <div class="callback-queue-label">Callback Queue</div>
+    <div class="call-stack">
+        <div class="call-stack-container">
+            <div class="call">Blocking CPU Task</div>
+            <div class="call">(Anonymous Function)()</div>
+        </div>
+    </div>
+    <div class="external-apis">
+        <div class="api-container">
+            <div class="api">
+                interval listener
+                <img src="spinner.gif" />
+                <div class="cb">onInterval</div>
+            </div>
+        </div>
+    </div>
+<div class="codes">
+
+```
+function onInterval() {
+    console.log("INTERVAL");
+}
+
+setInterval(onInterval, 5000);
+
+var i = 0;
+while(i < 10000000) {
+    //do some cpu heavy thing
+    i++;
+}
+```
+</div>
+    <pre class="console">
+    </pre>
+    <div class="callback-queue">
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+        <div class="cb">onInterval</div>
+        <div class="cb">renderUI</div>
+        <div class="cb">acceptConnection</div>
+        <div class="cb">writeResponse</div>
+    </div>
+    <img class="event-loop" src="event-loop.png" />
+    <img class="fail" src="explosion.png" />
+    <img class="unresponsive" src="pageunresponsive.jpg" />
+</div>
+
+
+
+
+
+
+
+---
+#General Blocking Rules
+* **DO NOT** use "sync" versions of functions
+    - fs.readSync()
+    - jQuery.ajax({async: false})
+* Resolve your callbacks asynchronously
+    - can starve I/O events if you don't
+    - use setTimeout(cb, 0) or setImmediate(cb)
+* Defer CPU intensive tasks
+    - C++
+    - Another process
+    - Service layer
+
+---
+#Mitigation
+* Browser
+    - Ajax
+    - CSS animations
+    - Web Workers
+* Node
+    - Messaging
+    - Nginx
+    - setImmediate()
+
+---
+#Recap
+* Javascript the language is single threaded
+* Javascript the runtime is not
+* Parts of the runtime communicate via the event loop
+* DON'T BLOCK THE EVENT LOOP
+* None of this is magic
+
+---
+class: middle, center
+#End Demo
+
+
+    </textarea>
+    <script src="remark-0.5.3.min.js" type="text/javascript"></script>
+    <script type="text/javascript">
+    var hljs = remark.highlighter.engine;
+    </script>
+    <!--<script src="js/remark.language.js" type="text/javascript"></script>-->
+    <script type="text/javascript">
+    var slideshow = remark.create({
+        highlightStyle: 'monokai',
+        highlightLanguage: 'remark'
+    });
+    </script>
+  </body>
+</html>
